@@ -81,12 +81,13 @@ module PaperTrail
       # `data_for_destroy` but PT-AT still does.
       data = event.data.merge(data_for_destroy)
 
-      version = @record.class.paper_trail.version_class.create(data)
-      if version.errors.any?
-        log_version_errors(version, :destroy)
-      else
+      version = @record.class.paper_trail.version_class.new(data)
+      begin
+        version.save!
         assign_and_reset_version_association(version)
         version
+      rescue StandardError => e
+        handle_version_errors e, version, :destroy
       end
     end
 
@@ -108,14 +109,15 @@ module PaperTrail
       )
       return unless version
 
-      if version.save
+      begin
+        version.save!
         # Because the version object was created using version_class.new instead
         # of versions_assoc.build?, the association cache is unaware. So, we
         # invalidate the `versions` association cache with `reset`.
         versions.reset
         version
-      else
-        log_version_errors(version, :update)
+      rescue StandardError => e
+        handle_version_errors e, version, :update
       end
     end
 
@@ -286,6 +288,16 @@ module PaperTrail
       )
     end
 
+    # Centralized handler for version errors
+    # @api private
+    def handle_version_errors(e, version, action)
+      if PaperTrail.config.always_raise_on_error
+        raise e
+      else
+        log_version_errors(version, action)
+      end
+    end
+
     # @api private
     # @return - The created version object, so that plugins can use it, e.g.
     # paper_trail-association_tracking
@@ -298,11 +310,12 @@ module PaperTrail
       data.merge!(data_for_update_columns)
 
       versions_assoc = @record.send(@record.class.versions_association_name)
-      version = versions_assoc.create(data)
-      if version.errors.any?
-        log_version_errors(version, :update)
-      else
+      version = versions_assoc.new(data)
+      begin
+        version.save!
         version
+      rescue StandardError => e
+        handle_version_errors e, version, :update
       end
     end
 
